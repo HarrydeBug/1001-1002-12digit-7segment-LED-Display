@@ -15,16 +15,32 @@
 //ZachTec 2016-2017
 
 #include <Wire.h>
+const char softwareversion[] = "1.01" ; //Version of this program, sent to serialport at startup
+
 char RotaryStringIn[6]={'d','a','t','a','\0'}; //String to hold Rotary Encoder input
 char KeyIn='\0';                               // Char to hold received Keyboard input
-char LEDString[12]={'1','2','1','2','1','2','1','2','1','2','1','2'};//Char to hold LED digits to be displayed
-uint64_t LEDNumber=0; //A number that will be displayed in unsigned 64bit version so we can do math on it.
+char LEDString[12]={'1','2','1','2','1','2','1','2','1','2','1','2'};//Char to hold LED digits to be displayed, used by the Keyboard portion
+uint64_t LEDNumber=0; //Number displayed on LED as unsigned 64bit version as used by the rotary encoder portion.
 byte InputState=0; //State 0=Rotary encoder updates LED display, 1=Keyboard inputs updates display
 
+boolean RotaryFound, KeypadFound=false; //If Rotary Encoder, Keypad and LCD Display was detected on the I2C Bus
+boolean LastRotaryFound, LastKeypadFound=false; //Last state of detection
 
 void setup() {
   Wire.begin();        // join i2c bus (address optional for master)
   Serial.begin(9600);  // start serial for output
+  ClearLEDString();
+  Serial.print("Zachtek I2C Master Software, Version: ");
+  Serial.println(softwareversion); 
+  
+  //Startup blink
+  digitalWrite(13,HIGH); 
+  delay(100);
+  digitalWrite(13,LOW);
+  delay(100);  
+  digitalWrite(13,HIGH); 
+  delay(100);
+  digitalWrite(13,LOW);
 }
 
   
@@ -45,9 +61,10 @@ boolean Notreceived;
     }
   }
   if (millis ()>=I2CTimeOut) {
-    Serial.println("Rotary Encoder I2C TIME OUT");
+    RotaryFound=false;
   }
   else
+    RotaryFound=true;
   { //We recevied data from I2C slave
     EncValue= atoi (RotaryStringIn); //Convert to Integer
     if (EncValue != 0) {//Rotary was moved
@@ -59,8 +76,7 @@ boolean Notreceived;
       }
       if (InputState==0){//State machine is in update Rotary update state
         DisplayNumber(); //Update LED Display
-        Serial.println("LEDNumber is now");
-        Serial.println(uint64ToStr (LEDNumber, true)); //Print the received data
+        Serial.println(uint64ToStr (LEDNumber, false)); //Print the received data
       }
     }  
   }
@@ -78,11 +94,11 @@ boolean Notreceived;
   }
   if (millis ()>=I2CTimeOut) 
   {
-    Serial.println("Keyboard I2C TIME OUT");
+    KeypadFound=false;
   }
   else
     {//We recevied data from I2C slave
-     
+     KeypadFound=true;
     if (KeyIn != '\0') //If a key was pressed 
     {    
       if (InputState==0){//if State machine was in Rotary state then change it to keyboard now that we got input from it 
@@ -90,37 +106,51 @@ boolean Notreceived;
         ClearLEDString;
       }
       if (KeyIn=='E'){//Enter Key was pressed
-        //DisplayString;//All numbers in, update the display
+        //All numbers in, update the display
         InputState=0;  //Go back to update the display from the rotary encoder now that Enter was pressed on the Keyboard
-        Serial.println(String(LEDString));
-        LEDNumber=StrTouint64_t (String(LEDString));
-        ClearLEDString();
+        LEDStringtoLEDnumber(); //Take the numbers from the Keyboard and store it 
+        //Serial.println(uint64ToStr(LEDNumber,false)); //Print the result of the Keyboard input
+        ClearLEDString();  //Clear the input buffer for Keyboard presses so it is blank at next use.
       }
       if (KeyIn=='<'){//Backspace Key was pressed
-        RightShiftLEDString(); 
-        DisplayString();
+        RightShiftLEDString();  //delete the last digit pressed
+        DisplayString();        //Update the LCD 
       }
       if (KeyIn>='0' && KeyIn <='9'){
-        LeftShiftLEDString();
-        LEDString[11]=KeyIn-48;//Convert ASCII to number
-        DisplayString();
-        Serial.print("New Digit ");
+        LeftShiftLEDString(); // make room for the last digit enter on the keyboard
+        LEDString[11]=KeyIn-48;//Convert ASCII to numbers that suits the LCD display I2C protocol 
+        DisplayString(); //Update the LCD 
       }
-      Serial.print("KeyBoard ");
-      Serial.println(KeyIn); //Print the received data
+      Serial.println(KeyIn); //Print the received Keyboard data on the serial port
     }  
   }
 
-  //LeftShiftLEDString();  
+  
   delay (50); //Query 20 times per second
-}
 
-/*
- functSetNumber(CmdParser *myParser) {
-  LEDNumber = StrTouint64_t(myParser->getCmdParam(1));
-  DisplayNumber();
+
+  // If any of the I2C devices was plugged or unpluged then print status messages
+
+  if (RotaryFound!=LastRotaryFound)
+  {
+    //if the Rotary Encoder  was pluged or unplugged 
+    LastRotaryFound=RotaryFound;
+    if (RotaryFound) 
+    {
+      Serial.println("Rotary Encoder connected on address 8"); 
+    }
+  }
+
+  if (KeypadFound!=LastKeypadFound)
+  { 
+    LastKeypadFound=KeypadFound; 
+    //if the Rotary Encoder  was pluged or unplugged 
+    if (KeypadFound) 
+    {
+      Serial.println("Keyboard connected on address 9"); 
+    }
+  }
 }
-*/
 
 void functInc(int Amount) {
   //Serial.println (Amount);
@@ -129,8 +159,6 @@ void functInc(int Amount) {
   {
     LEDNumber = 999999999999; 
   }
-  //
-  //Serial.println(uint64ToStr (LEDNumber,false));
 }
 
 void functDec(int Amount) {
@@ -145,9 +173,6 @@ void functDec(int Amount) {
   {
     LEDNumber = LEDNumber - decNumber;
   }
-  //DisplayNumber();
-  //Serial.print ("Dec LEDNumber med ");
-  //Serial.println (Amount);
 }
 
 
@@ -164,9 +189,10 @@ uint64_t  StrTouint64_t (String InString)
 
   for (int i = 0; i < InString.length(); i++) {
     char c = InString.charAt(i);
-    if (c < '0' || c > '9') break;
     y *= 10;
-    y += (c - '0');
+    if (c >= '0' && c <= '9') {
+      y += (c - '0');
+    }  
   }
   return y;
 }
@@ -211,21 +237,15 @@ void ClearLEDString (){
 }
 
 void RightShiftLEDString (){
-  Serial.println ("Rightshift");
   for (int i=11; i>0 ;i--) {
     LEDString[i]=LEDString[i-1]; //16=blank digit on LED display 
-    // Serial.println (LEDString [i]);
-    //Serial.println (LEDString [i+1]);
   }
   LEDString[0]=16;//16=blank digit on LED display 
 }
 
 void LeftShiftLEDString (){
-  Serial.println ("Leftshift");
   for (int i=0; i<11; i++ ) {
     LEDString[i]=LEDString[i+1]; 
-    //Serial.println (LEDString [i]);
-    //Serial.println (LEDString [i+1]);
   }
   LEDString[11]=16;//16=blank digit on LED display 
 }
@@ -238,7 +258,7 @@ boolean NotDigit=true;
   InString.toCharArray(l_ResultBuffer, 13);
   while (i<12) {
     if (l_ResultBuffer[i]=='0' && NotDigit) {
-      l_ResultBuffer[i]=16;//blank leading digit on LED display 
+      l_ResultBuffer[i]=16;//blank digit on LED display if digit is zero and we havent seen another digit yet (Leding zeros blank) 
     }
     else 
     {
@@ -251,12 +271,11 @@ boolean NotDigit=true;
   return String (l_ResultBuffer);
 }
 
+
 //Sends output to 12 Digit LED Display
 void DisplayNumber (){
 String DisplayString;
 char l_ResultBuffer [13]; //12 digits + null terminator char
-  //Send to LCD Display
-  //DisplayString=uint64ToStr (LEDNumber, true);
   DisplayString= ASCIIToNumbers(uint64ToStr (LEDNumber, true));
   DisplayString.toCharArray(l_ResultBuffer, 13);
   Wire.beginTransmission(10); // transmit to device #10
@@ -275,7 +294,8 @@ char l_ResultBuffer [13]; //12 digits + null terminator char
   Wire.endTransmission();    // stop transmitting
 }
 
-////Sends output to 12 Digit LED Display
+
+//Sends output to 12 Digit LED Display
 void DisplayString (){
   Wire.beginTransmission(10); // transmit to device #10
   Wire.write(LEDString[11]);              // send 12 bytes
@@ -293,3 +313,22 @@ void DisplayString (){
   Wire.endTransmission();    // stop transmitting
 }
 
+
+//Sends output to 12 Digit LED Display
+void  LEDStringtoLEDnumber (){
+  char l_ResultBuffer[12]; //12 digits 
+  int i=0;
+  while (i<12) {
+    if (LEDString[i]==16) {
+      l_ResultBuffer[i]=' ';//blank digit=16 on LCD I2C protocol, replace with aspace in the output string
+    }
+    else 
+    {
+      l_ResultBuffer[i]=LEDString[i]+48; //Converts ASCII number. (ASCII for char '0' is 48 but in LED I2C protocoll it is 0
+    }
+    i++;
+  }
+  LEDNumber=StrTouint64_t(l_ResultBuffer);//Convert the string to a 64bit unsigned Integer and store in LEDNumber so the 
+                                          //optical encoder can decrement or increment it
+                                        
+}
