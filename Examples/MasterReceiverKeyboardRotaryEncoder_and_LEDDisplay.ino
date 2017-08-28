@@ -1,5 +1,5 @@
 //This is a I2C Master software that receives I2C data from an Optical encoder, and KeyBoard and sends data to a LED Display
-//The Optical encoder is connected to another Arduino that counts pulses and acts as a I2C slave and waits for this program to query it.
+//The Optical encoder acts as a I2C slave and waits for this program to query it.
 //The same with the Keyboard.
 //The LED dispplay is also a slave but Receives data insteads of sending it.
 //This is usefull if you are out of pins on an arduino but have the use of I2C.
